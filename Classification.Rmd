@@ -1,0 +1,199 @@
+---
+title: "Classification Project"
+date: "22 February 2015"
+output: html_document
+---
+**Summary**
+
+The aim of this document is not only to find the "best" classification, but to explore few models and their constraint. We shall use three models:
+
+1. Linear Discriminant Analysis. 
+
+2. Recursive Partitioning, in other words recurisve tree with the rpart package. We shall explore bagging as well with the same tree method. 
+
+3. Random Forest, which is close to Bagging. 
+
+
+```{r, echo=FALSE}
+library(e1071)                                  ## For skewness calculation 
+library(MASS)
+library(ipred)                                  ## For bagging 
+library(caret, quietly = TRUE )
+library(randomForest,quietly = TRUE )
+setwd("~/Documents/Data Science Hopkins/Machine Learning/Project/Data")
+TrainingData <-read.csv("pml-training.csv", stringsAsFactors=FALSE)
+```
+*Pre Processing*
+Before to process the data, the training and test set have to be pre-process. Based on the initial EDA it appears:
+
+1- The first seven columns related to information about individuals are not relevent for the classification and therefore removed
+
+2- Some exercises raws columns are populated only at special stage, when the individual will change class. We make the hypothesis that it is a special exercise or summary and therefore is one exception. We remove those records.
+
+3- Some columns of type characters are empty, therefore we remove them
+
+4- The class columns is our output and we transform it as factor
+
+5- Check distribution, scale and skewness of the variables as we want to use multiple models, such as LDA, which is sensitve to outliers due to the fact that is it is based on euclidian distance (L2 norm). 
+
+
+```{r, echo=FALSE}
+# a) Remove the first 7  columns as we do not need for this prediction (time, people etc ... )
+# b) Remove lines with summary exercises
+# c) Remove columns with no data
+# d) Put the classe as factor instead of char 
+# e) Remove all the char columns they are empty 
+TrainingData <- TrainingData[,-(1:7)]
+TrainingData <- TrainingData[nchar(TrainingData$kurtosis_roll_belt[]) == 0,  ]
+cols=colSums(is.na(TrainingData))==0
+TrainingData <- TrainingData[, cols]
+# 
+TrainingData$classe <-as.factor(TrainingData$classe) 
+#  Now we want to remove all the empty column 
+CharColumns <-ls.str(TrainingData, mode="character")
+AllNames <-names(TrainingData)
+ToKeep   <-AllNames[!(AllNames %in% CharColumns[])]
+TrainingData <-TrainingData[,ToKeep]
+```
+After this processing the number of training observations have been reduces to ```r nrow(TrainingData) ``` and the number of predictors to ```r ncol(TrainingData) -1```. As we want to use multiple models and some are more sensitives to differences in scales or skewness. 
+It appears in the following plot that we have extrem skewnesses with five variables, that we should explore. 
+```{r, echo=FALSE}
+skewnessvalues<-apply(TrainingData[,-c(53)], 2, skewness)
+todisplay <-data.frame(name<-attributes(skewnessvalues), skewnessvalues, stringsAsFactors = FALSE)
+variabletoexplore <-todisplay$name[which(abs(todisplay$skewnessvalues) > c(25))]
+```
+
+Based on the previous plot we have the following variable to assess: 
+
+1.```r variabletoexplore[1]```  
+
+2.```r variabletoexplore[2]``` 
+
+3.```r variabletoexplore[3]```  
+
+4.```r variabletoexplore[4]``` 
+
+5.```r variabletoexplore[5]``` 
+
+Distribution of the five variables with high skewness. 
+
+```{r, echo=FALSE}
+par(mfcol=c(1,5))
+hist(TrainingData[,variabletoexplore[1]], main=variabletoexplore[1], xlab="Value")
+hist(TrainingData[,variabletoexplore[2]], main=variabletoexplore[2], xlab="Value")
+hist(TrainingData[,variabletoexplore[3]], main=variabletoexplore[3], xlab="Value")
+hist(TrainingData[,variabletoexplore[4]], main=variabletoexplore[4], xlab="Value")
+hist(TrainingData[,variabletoexplore[5]], main=variabletoexplore[5], xlab="Value")
+```
+
+It appears that we have one outlier, creating extrem skewness ```r which(TrainingData[,variabletoexplore[1]] < -50)```. This observation is removed from our data set and the diffrence is presented in the plot below. We shall not display all the distributions here, the five presented above are now close to normal. 
+
+```{r, echo=FALSE}
+par(mfcol=c(1,2))
+dotchart(todisplay$skewnessvalues, todisplay$names, xlab=c("Skewness"),main=c("Training Variable Skewness with oulier"), cex=c(.6))
+TrainingData <-TrainingData[-which(TrainingData[,variabletoexplore[1]] < -50),]
+skewnessvalues<-apply(TrainingData[,-c(53)], 2, skewness)
+todisplay <-data.frame(name<-attributes(skewnessvalues), skewnessvalues, stringsAsFactors = FALSE)
+dotchart(todisplay$skewnessvalues, todisplay$names, xlab=c("Skewness"),main=c("Training Variable Skewness"), cex=c(.6))
+par(mfcol=c(1,1))
+```
+
+
+**Models Building**
+As mentioned before we shall use mutliple models, check the results and then select the right model. Based on the model, the testing and training set will change. As we deal with classification of multiple categories, tree type of models could be good candidates. 
+To be able to compare, we use linear discriment as well. 
+
+```{r , echo=FALSE}
+trainindex    <-createDataPartition(TrainingData$classe, p=.70, list = FALSE)
+trainingset   <-TrainingData[trainindex,]
+testingset    <-TrainingData[-trainindex,]  
+```
+*Linear Discriminant Analysis*
+With linear discriminant analysis, we make the assumption, that we could have a linear relation between the observation and the probabilty assign to the four categories of class. The result of the prediction is with a probability > .5. 
+The training set used is made of .7 of the original data set
+```{r}
+set.seed(533)
+ldamodel <-lda(classe~.,data=trainingset)
+predicclass <-predict(ldamodel, testingset)
+ldaresults <-confusionMatrix(predicclass$class, testingset$classe)
+ldaaccuracy <-ldaresults$overall[1]
+```
+This first simple model delivers an accuracy of ```r ldaaccuracy```.
+
+*Simple recursive tree*
+Before to use "black boxe" methods, which we will give better prediction by an increase we do not know, we use simple recursive tree. We shall define the complexity level to arrive to the best accuracy with this type of tree or more exactly to have the most adequate pruning.  We shall use cross validation method with ten folds. 
+
+See [caret](http://topepo.github.io/caret/adaptive.html) for details about the trainControl caret function.
+
+```{r}
+numFolds = trainControl( method = "cv", number = 10 )
+rpartcomplexity <-expand.grid( .cp = seq(0.01,0.5,0.01))  # Set various values for the cp paramenters of rpart 
+result<-train(classe~., data = trainingset, method = "rpart", trControl = numFolds, tuneGrid = rpartcomplexity )  ## this function will take time !!
+```
+
+To build the model, we should use a cp value of ```r result$bestTune```, which in this special case is the default value of rpart.control().
+
+```{r}
+rpartmodel <-rpart(classe~., data = trainingset, method="class")
+trainingpredicttree <-predict(rpartmodel, data= trainingset, type="class")
+trainingtreeaccuracy <-confusionMatrix(trainingpredicttree, trainingset$classe)$overall[1]
+predicttree <-predict(rpartmodel, newdata= testingset, type="class")
+rpartresults <-confusionMatrix(predicttree, testingset$classe)
+rpartaccuracy <-rpartresults$overall[1]
+```
+
+Using the rpart with K fold of ten the accuracy is ```r  rpartaccuracy```, which is a significant increase. 
+
+*Bagging with rpart*
+
+As tree have tendancy to overfitting as previously, our accuracy with the training set was of ```r  trainingtreeaccuracy`` and of ```r rpartaccuracy``` with the testing set. Bagging also known as Bootstrap aggregation is used with the same recursive tree method. 
+We shall use the default parameters of the function bagging() from ipred package, 25 bootstrap with out of bag estimate of error.
+
+
+```{r}
+bagmodel <- bagging(classe ~ ., data = trainingset, coob=TRUE)  ## As cross validation takes time 
+predictbagging <-predict(bagmodel, newdata=testingset)
+baggingaccuracy<-confusionMatrix(predictbagging, testingset$classe)$overal[1]
+```
+
+With this method we now reach one accuracy of ```r baggingaccuracy```, which is a big gain comare to the two previous methods. 
+
+*Random forest* 
+
+One other method, which is not part of ensemble is the random forest. This method includes bagging as well as random feature selections. 
+```{r}
+rfmodel10trees <-train(classe~., data=trainingset, method="rf", ntree=10)
+predictrf10 <-predict(rfmodel10trees, newdata= testingset)
+rf10treesaccuracy <-confusionMatrix(predictrf10,testingset$classe)$overal[1]
+```
+The new accuracy with random forest and only ten tress is ```r rf10treesaccuracy``` compare to ```r baggingaccuracy``` for bagging only. 
+
+**Conclusion**
+
+As expected it appears that the accuracy of the prediction increases with the complexity of the method used. The table below summarizes the levels of accuracy achieved by various methods. Based on the results, we take the random forst method to do prediction of type competition.  If the aim was to have on explicit model a good enough prediction rather than nothing the recursive tree could be a good candidate due to its simplicity. 
+
+| Method              | Accuracy               |
+|:--------------------|-----------------------:|
+|Linear Discriminant  |```r  ldaaccuracy```    |
+|Recursive Tree       |```r rpartaccuracy```   |
+|Bagging Tree         |```r baggingaccuracy``` | 
+|Random Forest 10     |```r rf10treesaccuracy```|
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
