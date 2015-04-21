@@ -56,7 +56,7 @@ ToKeep   <-AllNames[!(AllNames %in% CharColumns[])]
 TrainingData <-TrainingData[,ToKeep]
 ```
 After this processing the number of training observations have been reduces to ```r nrow(TrainingData) ``` and the number of predictors to ```r ncol(TrainingData) -1```. As we want to use multiple models and some are more sensitives to differences in scales or skewness. 
-It appears in the following plot that we have extrem skewnesses with five variables, that we should explore. 
+It appears in the following plot that we have extreme skewness with five variables, that we should explore. 
 ```{r, echo=FALSE}
 skewnessvalues<-apply(TrainingData[,-c(53)], 2, skewness)
 todisplay <-data.frame(name<-attributes(skewnessvalues), skewnessvalues, stringsAsFactors = FALSE)
@@ -86,7 +86,7 @@ hist(TrainingData[,variabletoexplore[4]], main=variabletoexplore[4], xlab="Value
 hist(TrainingData[,variabletoexplore[5]], main=variabletoexplore[5], xlab="Value")
 ```
 
-It appears that we have one outlier, creating extrem skewness ```r which(TrainingData[,variabletoexplore[1]] < -50)```. This observation is removed from our data set and the diffrence is presented in the plot below. We shall not display all the distributions here, the five presented above are now close to normal. 
+It appears that we have one outlier, creating extreme skewness, with index: ```r which(TrainingData[,variabletoexplore[1]] < -50)```. This observation is removed from our data set and the diffrence is presented in the plot below. We shall not display all the distributions here, the five presented above are now close to normal. 
 
 ```{r, echo=FALSE}
 par(mfcol=c(1,2))
@@ -100,6 +100,7 @@ par(mfcol=c(1,1))
 
 
 **Models Building**
+
 As mentioned before we shall use mutliple models, check the results and then select the right model. Based on the model, the testing and training set will change. As we deal with classification of multiple categories, tree type of models could be good candidates. 
 To be able to compare, we use linear discriment as well. 
 
@@ -109,6 +110,7 @@ trainingset   <-TrainingData[trainindex,]
 testingset    <-TrainingData[-trainindex,]  
 ```
 *Linear Discriminant Analysis*
+
 With linear discriminant analysis, we make the assumption, that we could have a linear relation between the observation and the probabilty assign to the four categories of class. The result of the prediction is with a probability > .5. 
 The training set used is made of .7 of the original data set
 ```{r}
